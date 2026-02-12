@@ -57,19 +57,25 @@ class RedirectModel(BaseModel):
     server: Optional[Dict[str, str]] = None
 
 
-class ResponseModel(BaseModel):
-    network: str
+lass ResponseModel(BaseModel):
+    # 'network' and 'resource_type' were missing in app.py output, so we make them optional or remove them.
+    # We added 'video' because app.py sends it.
+    
     page_title: str
     meta_description: str
     network_data: List[NetworkDataModel]
     logs: List[LogModel]
     cookies: List[CookieModel]
-    resource_type: str
     performance_metrics: PerformanceMetricsModel
     screenshot: str
     thumbnail: str
     downloaded_files: List[DownloadedFileModel]
     redirects: List[RedirectModel]
+    video: str  # <--- Added this field!
+    
+    # Optional fields (in case we want to add them back later)
+    network: Optional[str] = None
+    resource_type: Optional[str] = None
 
 
 class ScreenshotResponse(BaseModel):
