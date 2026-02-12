@@ -292,3 +292,30 @@ async def hide_cookie_banners(page):
         """)
     except Exception as e:
         print(f"Error hiding cookie banners: {e}")
+
+from pathlib import Path
+
+
+def setup_configurations():
+    load_env_file()
+
+    # ... (keep cache setup)
+    cache = Cache("./cache")
+    cache_expiration_seconds = int(os.getenv("CACHE_EXPIRATION_SECONDS", 3600))
+
+    # ... (keep playwright path)
+    playwright_browsers_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    if playwright_browsers_path != "0":
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = playwright_browsers_path
+
+    # ... (keep security setup)
+    api_key = os.environ.get("API_KEY", "none")
+    security = HTTPBearer(auto_error=False)
+    
+    # === ADDED THIS SECTION ===
+    # Database Configuration
+    # This creates a file named 'scraproxy.db' in the main folder
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./scraproxy.db")
+    
+    # Returns the new DATABASE_URL along with other settings
+    return cache, cache_expiration_seconds, security, api_key, DATABASE_URL
