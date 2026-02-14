@@ -66,25 +66,18 @@ async def lifespan(app: FastAPI):
     yield
     # Server band hone par kuch karna ho toh yahan likho
 app = FastAPI(
-    title="Playwright-based Webpage Scraper API",
+    title="Browser Automation API",
     description="""
-    This API allows users to browse webpages, capture screenshots, minimize HTML content, and extract text from HTML.
-    Built using **FastAPI** and **Playwright**, this API provides advanced browsing features, handling redirects, and capturing network details. 
-    It is designed for automation, scraping, and content extraction.
-
-    ## Features:
-    - **Browse Endpoint**: Retrieve detailed information about a webpage including network data, logs, performance metrics, redirects, and more.
-    - **Screenshot Endpoint**: Capture a screenshot of any given URL, with optional full-page capture.
-    - **Minimize HTML Endpoint**: Minify HTML content by removing unnecessary comments and whitespace.
-    - **Extract Text Endpoint**: Extract clean, plain text from provided HTML content.
-
-    ## Authentication:
-    - API uses optional Bearer token authentication. If an API key is set via the `API_KEY` environment variable, it must be provided in the Authorization header. Otherwise, no authentication is required.
+    🚀 **Advanced Scraping API** built with Playwright, FastAPI, and SQLite.
     
-    ## Usage:
-    - The **Browse** endpoint can track redirects and capture detailed request and response data.
-    - The **Screenshot** endpoint allows live capture or retrieval from cache.
-    - Minify HTML or extract text from raw HTML via the **Minimize HTML** and **Extract Text** endpoints.
+    This API allows you to automate browser tasks, capture media, and track usage.
+    
+    ### ✨ Key Features:
+    * **🕷️ Smart Browsing:** Full JavaScript support with anti-detection & cookie blocking.
+    * **📸 Media Capture:** Screenshots (Full Page), PDF, and Video recording.
+    * **📊 Analytics:** Built-in dashboard for Request History & Usage Stats.
+    * **🛡️ Security:** Rate Limiting to prevent abuse.
+    * **🗄️ Database:** SQLite integration for persistent logging.
     """,
     
     version="1.0.0",
