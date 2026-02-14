@@ -551,3 +551,183 @@ async def screenshotter(
 
     return JSONResponse(content=images)
 
+@app.get("/history", tags=["Analytics"])
+@limiter.limit("60/minute")
+async def history(request: Request,limit: int = 50, credentials: HTTPAuthorizationCredentials = Depends(optional_auth)):
+    return get_request_history(limit)
+
+@app.get("/stats", tags=["Analytics"])
+@limiter.limit("60/minute")
+async def stats(request: Request,credentials: HTTPAuthorizationCredentials = Depends(optional_auth)):
+    return get_stats()
+
+@app.post("/minimize", response_model=MinimizeHTMLResponse, status_code=200)
+async def minimize_html(
+    html: str = Form(...),
+    credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+):
+    """
+    Minimize the given HTML content by removing unnecessary comments and whitespace.
+
+    The HTML content provided in the `html` form field is minimized using the `htmlmin` library,
+    which removes comments and extra spaces. If the minimized HTML is cached, the cached version is returned.
+    Otherwise, the HTML is minimized, cached, and returned.
+
+    Args:
+        html (str): The HTML content to be minimized, provided as a form field.
+
+    Returns:
+        MinimizeHTMLResponse: A JSON response containing the minimized HTML content.
+
+    Raises:
+        HTTPException: If there are any issues during HTML minimization.
+
+    Response schema:
+        200 Successful Response:
+        {
+            "minified_html": "string"
+        }
+    """
+
+    cache_key = generate_cache_key(html)
+    if cache_key in cache:
+        return JSONResponse(content={"minified_html": cache[cache_key]})
+
+    minified_html = htmlmin.minify(html, remove_comments=True, remove_empty_space=True)
+    cache.set(cache_key, minified_html, expire=CACHE_EXPIRATION_SECONDS)
+    return MinimizeHTMLResponse(minified_html=minified_html)
+
+
+@app.post("/extract_text", response_model=ExtractTextResponse, status_code=200)
+async def extract_text_from_html(
+    html: str = Form(...),
+    credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+):
+    """
+    Extract plain text from the provided HTML content.
+
+    The HTML content provided in the `html` form field is parsed using `BeautifulSoup`
+    to extract the plain text, removing all HTML tags and formatting. If the text is cached,
+    the cached version is returned. Otherwise, the plain text is extracted, cached, and returned.
+
+    Args:
+        html (str): The HTML content from which to extract plain text, provided as a form field.
+
+    Returns:
+        ExtractTextResponse: A JSON response containing the extracted plain text.
+
+    Raises:
+        HTTPException: If there are any issues during HTML parsing or text extraction.
+
+    Response schema:
+        200 Successful Response:
+        {
+            "text": "string"
+        }
+    """
+    cache_key = generate_cache_key(html)
+
+    if cache_key in cache:
+        return JSONResponse(content={"text": cache[cache_key]})
+
+    soup = BeautifulSoup(html, "html.parser")
+    text_content = soup.get_text(separator=" ", strip=True)
+    cache.set(cache_key, text_content, expire=CACHE_EXPIRATION_SECONDS)
+    return ExtractTextResponse(text=text_content)
+
+
+@app.post("/reader", response_model=ReaderResponse)
+async def html_to_reader(html: str = Form(...)):
+    """
+    Extracts the main readable content and title from the provided HTML using the readability library.
+
+    Parameters:
+    - **html**: The raw HTML content provided via a form field.
+
+    Returns:
+    - **ReaderResponse**: A JSON object containing the extracted title and main content.
+    """
+    if not html:
+        raise HTTPException(status_code=400, detail="No HTML content provided")
+
+    doc = Document(html)
+    reader_content = doc.summary()
+    title = doc.title()
+
+    return ReaderResponse(title=title, content=reader_content)
+
+
+@app.post("/markdown", response_model=MarkdownResponse)
+async def html_to_markdown(html: str = Form(...)):
+    """
+    Convert the provided HTML content into Markdown format.
+
+    ### Parameters:
+    - **html**: The raw HTML content provided via a form field.
+
+    ### Returns:
+    - **MarkdownResponse**: A JSON object containing the converted Markdown content.
+    """
+    if not html:
+        raise HTTPException(status_code=400, detail="No HTML content provided")
+
+    markdown_converter = html2text.HTML2Text()
+    markdown_converter.ignore_links = False
+    markdown_content = markdown_converter.handle(html)
+
+    return MarkdownResponse(markdown=markdown_content)
+
+
+@app.get("/video", response_class=FileResponse)
+@limiter.limit("30/minute")
+async def video(
+    request: Request,
+    url: str,
+    browser_name: str = "chromium",
+    width: int = Query(1280),
+    height: int = Query(720),
+):
+    """
+    Browse a webpage, record a video of the session, and return the video file to play in the browser.
+
+    ### Parameters:
+    - **url**: (str) The URL of the webpage to browse.
+    - **browser_name**: (str) The browser to use (chromium, firefox, webkit). Defaults to "chromium".
+    - **width**: (int) Video width. Defaults to 1280.
+    - **height**: (int) Video height. Defaults to 720.
+
+    ### Returns:
+    - The recorded video file of the browsing session.
+    """
+
+    async with async_playwright() as p:
+        browser_type = getattr(p, browser_name, None)
+        if browser_type is None:
+            raise HTTPException(
+                status_code=400, detail=f'Browser "{browser_name}" is not supported'
+            )
+
+        video_dir = os.path.join(os.getcwd(), "videos")
+        os.makedirs(video_dir, exist_ok=True)
+        video_filename = url_to_sha256_filename(url)
+
+        browser = await browser_type.launch(headless=True)
+        context = await browser.new_context(
+            record_video_dir=video_dir,
+            record_video_size={"width": width, "height": height},
+        )
+        page = await context.new_page()
+
+        try:
+            await page.goto(url, wait_until="networkidle")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Error navigating to the page: {str(e)}"
+            )
+
+        await context.close()
+        video_path = await page.video.path()
+        await browser.close()
+        return FileResponse(
+            video_path, media_type="video/webm", filename=video_filename
+        )
