@@ -57,7 +57,7 @@ class RedirectModel(BaseModel):
     server: Optional[Dict[str, str]] = None
 
 
-lass ResponseModel(BaseModel):
+class ResponseModel(BaseModel):
     # 'network' and 'resource_type' were missing in app.py output, so we make them optional or remove them.
     # We added 'video' because app.py sends it.
     
