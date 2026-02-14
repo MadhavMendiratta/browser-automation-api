@@ -1,2 +1,32 @@
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
 .venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment Variables (Keep API keys secret!)
+.env
+
+# Database (Don't commit local data)
+*.db
+*.sqlite3
+scraproxy.db
+
+# Playwright & Runtime Media
+/videos/
+/downloads/
+/cache/
+test-results/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Mac OS
+.DS_Store
