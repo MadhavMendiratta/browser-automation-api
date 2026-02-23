@@ -1,29 +1,24 @@
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from fastapi import FastAPI, Depends, HTTPException, Form, Query, Security
+from fastapi import FastAPI, Depends, HTTPException, Form, Query, Security, BackgroundTasks, Request
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
-from fastapi import Request 
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles  # FIXED: Added for serving frontend static files
+from fastapi.templating import Jinja2Templates  # FIXED: Added for Jinja2 template rendering
 from playwright.async_api import async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-from fastapi.responses import FileResponse
 from starlette.middleware.gzip import GZipMiddleware
 import playwright._impl._errors as playwright_errors
 import base64
 import time
 import uuid
 import json
-import base64
-import os
-from datetime import datetime
 import os
 from datetime import datetime
 from bs4 import BeautifulSoup
 import htmlmin
-# Existing imports ke saath ye add karo:
-from fastapi import BackgroundTasks  # <-- Ye add karna zaroori hai
-from contextlib import asynccontextmanager # <-- Ye bhi add karo
+from contextlib import asynccontextmanager
 
 # Hamare naye database functions import karo
 from database import init_db, log_request_to_db, get_request_history, get_stats
@@ -39,10 +34,8 @@ from definitions import (
 import html2text
 from readability import Document
 from utils import generate_cache_key, optimize_image, create_thumbnail, smooth_scroll
-import json
 from PIL import Image
 import io
-import uuid
 from config import setup_configurations, url_to_sha256_filename, hide_cookie_banners
 
 # === RATE LIMITER SETUP ===
@@ -100,6 +93,16 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
     )
 
 cache, CACHE_EXPIRATION_SECONDS, security, API_KEY, DATABASE_URL = setup_configurations()
+
+# FIXED: Ensure frontend directories exist before mounting
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js"), exist_ok=True)
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "partials"), exist_ok=True)
+
+# FIXED: Mount static files directory for CSS/JS assets
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")), name="static")
+
+# FIXED: Initialize Jinja2 template engine
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates"))
 
 
 def optional_auth(
@@ -724,3 +727,209 @@ async def video(
         return FileResponse(
             video_path, media_type="video/webm", filename=video_filename
         )
+
+
+# ====================================================================
+# FRONTEND ROUTES — Jinja2 + HTMX Pages
+# ====================================================================
+
+@app.get("/", response_class=HTMLResponse, tags=["Frontend"])
+async def dashboard_page(request: Request):
+    """Render the main Dashboard / Scraper Console page."""
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@app.get("/history-page", response_class=HTMLResponse, tags=["Frontend"])
+async def history_page(request: Request):
+    """Render the Request History page with the last 50 entries."""
+    history_data = get_request_history(50)
+    return templates.TemplateResponse("history.html", {"request": request, "history": history_data})
+
+
+@app.get("/history-search", response_class=HTMLResponse, tags=["Frontend"])
+async def history_search(request: Request, q: str = Query("")):
+    """HTMX partial: filter history table rows by search query."""
+    history_data = get_request_history(100)
+    if q.strip():
+        q_lower = q.lower().strip()
+        history_data = [
+            h for h in history_data
+            if q_lower in h.get("url", "").lower()
+            or q_lower in h.get("endpoint", "").lower()
+            or q_lower in str(h.get("status_code", ""))
+        ]
+    return templates.TemplateResponse("partials/history_rows.html", {"request": request, "history": history_data})
+
+
+@app.get("/stats-page", response_class=HTMLResponse, tags=["Frontend"])
+async def stats_page(request: Request):
+    """Render the Analytics / Stats page with KPI cards and charts."""
+    stats_data = get_stats()
+    return templates.TemplateResponse("stats.html", {"request": request, "stats": stats_data})
+
+
+@app.post("/scrape-htmx", response_class=HTMLResponse, tags=["Frontend"])
+@limiter.limit("15/minute")
+async def scrape_htmx(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    action: str = Form("screenshot"),
+    block_cookies: bool = Form(False),
+    scroll_page: bool = Form(False),
+):
+    """
+    HTMX endpoint: Always captures screenshot + raw HTML + action-specific data.
+    Returns a tabbed HTML partial (result_card.html) for Alpine.js tab switching.
+    """
+    start_time = time.time()
+    result = {}
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            # Navigate
+            nav_response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            status_code = nav_response.status if nav_response else 0
+
+            # Optional: close cookie banners
+            if block_cookies:
+                try:
+                    await hide_cookie_banners(page)
+                except Exception:
+                    pass
+
+            # Wait for network to settle
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except PlaywrightTimeoutError:
+                pass
+
+            # Optional: scroll to bottom
+            if scroll_page:
+                try:
+                    await smooth_scroll(page, max_duration=10)
+                except Exception:
+                    pass
+
+            title = await page.title() or "Untitled"
+
+            # --- Always capture ALL three data types for the tabbed UI ---
+
+            # 1. Screenshot (always)
+            screenshot_bytes = await page.screenshot(full_page=True)
+            image = Image.open(io.BytesIO(screenshot_bytes))
+            optimized = optimize_image(image, quality=85)
+            screenshot_b64 = base64.b64encode(optimized).decode("utf-8")
+
+            # 2. Raw HTML (always)
+            raw_html = await page.content()
+
+            # 3. Action-specific primary data
+            primary_data = ""
+            if action == "extract_text":
+                soup = BeautifulSoup(raw_html, "html.parser")
+                primary_data = soup.get_text(separator="\n", strip=True)
+            elif action == "markdown":
+                md_converter = html2text.HTML2Text()
+                md_converter.ignore_links = False
+                primary_data = md_converter.handle(raw_html)
+            else:
+                primary_data = screenshot_b64  # browse/screenshot use image as primary
+
+            # 4. Build JSON metadata
+            meta_description = ""
+            try:
+                meta_el = await page.locator("meta[name='description']").get_attribute("content")
+                meta_description = meta_el or ""
+            except Exception:
+                pass
+
+            json_metadata = {
+                "url": url,
+                "action": action,
+                "status_code": status_code,
+                "title": title,
+                "meta_description": meta_description,
+                "page_url": page.url,
+            }
+
+            await context.close()
+            await browser.close()
+
+        process_time = time.time() - start_time
+        json_metadata["response_time_seconds"] = round(process_time, 2)
+
+        result = {
+            "type": action,
+            "data": primary_data,
+            "screenshot": screenshot_b64,
+            "raw_html": raw_html,
+            "json_data": json.dumps(json_metadata, indent=2),
+            "title": title,
+            "status_code": status_code,
+            "response_time": round(process_time, 2),
+            "url": url,
+            "success": True,
+        }
+
+        # Log to DB in background
+        background_tasks.add_task(
+            log_request_to_db, url, action, status_code, process_time, False, None
+        )
+
+        response = templates.TemplateResponse(
+            "partials/result_card.html", {"request": request, "result": result}
+        )
+        response.headers["HX-Trigger"] = json.dumps({
+            "showToast": {"message": f"Scraping completed — {title[:40]}", "type": "success"}
+        })
+        return response
+
+    except Exception as e:
+        process_time = time.time() - start_time
+        result = {
+            "type": "error",
+            "data": str(e),
+            "screenshot": "",
+            "raw_html": "",
+            "json_data": json.dumps({"error": str(e)}, indent=2),
+            "success": False,
+            "response_time": round(process_time, 2),
+            "url": url,
+            "status_code": 500,
+            "title": "Error",
+        }
+        background_tasks.add_task(
+            log_request_to_db, url, action, 500, process_time, False, str(e)
+        )
+
+        response = templates.TemplateResponse(
+            "partials/result_card.html", {"request": request, "result": result}
+        )
+        response.headers["HX-Trigger"] = json.dumps({
+            "showToast": {"message": f"Scraping failed: {str(e)[:80]}", "type": "error"}
+        })
+        return response
+
+
+# ====================================================================
+# HTMX COMPONENT ENDPOINTS
+# ====================================================================
+
+@app.get("/components/recent-activity", response_class=HTMLResponse, tags=["Frontend"])
+async def recent_activity_component(request: Request):
+    """HTMX partial: Returns the last 5 requests as list items for the live activity widget."""
+    history_data = get_request_history(5)
+    return templates.TemplateResponse(
+        "partials/recent_activity.html", {"request": request, "items": history_data}
+    )
+
+
+@app.get("/api/health", tags=["System"])
+async def health_check():
+    """Simple health check endpoint for the server status indicator."""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}

@@ -25,7 +25,10 @@ def setup_configurations():
     api_key = os.environ.get("API_KEY", "none")
     security = HTTPBearer(auto_error=False)
 
-    return cache, cache_expiration_seconds, security, api_key
+    # FIXED: Added DATABASE_URL to return value — app.py destructures 5 values but only 4 were returned
+    database_url = os.environ.get("DATABASE_URL", "sqlite:///./scraper.db")
+
+    return cache, cache_expiration_seconds, security, api_key, database_url
 
 async def hide_cookie_banners(page):
     """
