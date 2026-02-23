@@ -1,0 +1,53 @@
+{% if items %}
+{% for item in items %}
+<li class="flex items-center gap-3 py-2.5 px-1 group {% if not loop.last %}border-b border-slate-100{% endif %}">
+    <!-- Endpoint Icon -->
+    <div class="flex items-center justify-center w-8 h-8 rounded-lg shrink-0
+        {% if item.endpoint == 'browse' %}bg-blue-50
+        {% elif item.endpoint == 'screenshot' %}bg-purple-50
+        {% elif item.endpoint == 'extract_text' %}bg-amber-50
+        {% elif item.endpoint == 'markdown' %}bg-emerald-50
+        {% else %}bg-slate-100{% endif %}">
+        {% if item.endpoint == 'screenshot' %}
+            <svg class="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
+        {% elif item.endpoint == 'browse' %}
+            <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+        {% elif item.endpoint == 'extract_text' %}
+            <svg class="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        {% else %}
+            <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        {% endif %}
+    </div>
+
+    <!-- Info -->
+    <div class="flex-1 min-w-0">
+        <p class="text-[13px] font-medium text-slate-700 truncate" title="{{ item.url }}">
+            {{ item.url.split("//")[-1][:35] }}{% if item.url.split("//")[-1]|length > 35 %}…{% endif %}
+        </p>
+        <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-[10px] font-semibold uppercase tracking-wider
+                {% if item.endpoint == 'browse' %}text-blue-500
+                {% elif item.endpoint == 'screenshot' %}text-purple-500
+                {% elif item.endpoint == 'extract_text' %}text-amber-500
+                {% else %}text-emerald-500{% endif %}">{{ item.endpoint }}</span>
+            <span class="text-slate-300">·</span>
+            <span class="text-[10px] text-slate-400 tabular-nums">{{ item.created_at[:16] | default("—") }}</span>
+        </div>
+    </div>
+
+    <!-- Status -->
+    <div class="shrink-0">
+        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold
+            {% if item.status_code >= 200 and item.status_code < 300 %}bg-emerald-100 text-emerald-700
+            {% elif item.status_code == 429 %}bg-amber-100 text-amber-700
+            {% else %}bg-red-100 text-red-700{% endif %}">
+            {{ item.status_code }}
+        </span>
+    </div>
+</li>
+{% endfor %}
+{% else %}
+<li class="py-6 text-center">
+    <p class="text-xs text-slate-400">No activity recorded yet</p>
+</li>
+{% endif %}

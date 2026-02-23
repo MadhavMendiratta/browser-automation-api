@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block page_subtitle %}Visual insights into API usage{% endblock %}
+{% block nav_stats %}text-white bg-indigo-600/20 shadow-sm{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- ===== KPI CARDS ===== -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        <!-- Total Requests -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-50">
+                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Requests</p>
+            </div>
+            <p class="text-3xl font-bold text-slate-900 tracking-tight">{{ stats.total_requests | default(0) }}</p>
+            <p class="text-xs text-slate-400 mt-1">All time</p>
+        </div>
+
+        <!-- Success Rate -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-50">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Success Rate</p>
+            </div>
+            <p class="text-3xl font-bold text-slate-900 tracking-tight">{{ stats.success_rate_percent | default(0) }}%</p>
+            <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
+                <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style="width: {{ stats.success_rate_percent | default(0) }}%"></div>
+            </div>
+        </div>
+
+        <!-- Avg Response Time -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-50">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Avg Response</p>
+            </div>
+            <p class="text-3xl font-bold text-slate-900 tracking-tight">{{ stats.average_response_time_seconds | default(0) }}s</p>
+            <p class="text-xs text-slate-400 mt-1">Per request</p>
+        </div>
+
+        <!-- Cache Hit Rate -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-violet-50">
+                    <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                    </svg>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Cache Hit Rate</p>
+            </div>
+            <p class="text-3xl font-bold text-slate-900 tracking-tight">{{ stats.cache_hit_rate_percent | default(0) }}%</p>
+            <div class="mt-2 w-full bg-slate-100 rounded-full h-1.5">
+                <div class="bg-violet-500 h-1.5 rounded-full transition-all duration-500" style="width: {{ stats.cache_hit_rate_percent | default(0) }}%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CHARTS ROW ===== -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Doughnut Chart: Requests per Endpoint -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-indigo-50">
+                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-sm font-semibold text-slate-900">Requests by Endpoint</h3>
+                    <p class="text-[11px] text-slate-500">Distribution across API endpoints</p>
+                </div>
+            </div>
+            <div class="relative h-64 flex items-center justify-center">
+                <canvas id="endpointChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Bar Chart: Top Domains -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-50">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-sm font-semibold text-slate-900">Top Domains</h3>
+                    <p class="text-[11px] text-slate-500">Most frequently scraped domains</p>
+                </div>
+            </div>
+            <div class="relative h-64">
+                <canvas id="domainsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Pass stats data from Jinja2 to JavaScript
+    window.statsData = {{ stats | tojson }};
+</script>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% for item in history %}
+<tr class="hover:bg-slate-50/80 transition-colors duration-100">
+    <!-- ID -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        <span class="text-xs font-mono font-medium text-slate-500">#{{ item.id }}</span>
+    </td>
+
+    <!-- Endpoint -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold uppercase tracking-wide
+            {% if item.endpoint == 'browse' %}bg-blue-50 text-blue-700
+            {% elif item.endpoint == 'screenshot' %}bg-purple-50 text-purple-700
+            {% elif item.endpoint == 'extract_text' %}bg-amber-50 text-amber-700
+            {% elif item.endpoint == 'markdown' %}bg-emerald-50 text-emerald-700
+            {% else %}bg-slate-100 text-slate-600{% endif %}">
+            {{ item.endpoint | default("—") }}
+        </span>
+    </td>
+
+    <!-- URL -->
+    <td class="px-5 py-3.5 max-w-xs">
+        <p class="text-sm text-slate-700 truncate font-mono" title="{{ item.url }}">{{ item.url[:60] }}{% if item.url|length > 60 %}…{% endif %}</p>
+    </td>
+
+    <!-- Status Badge -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold
+            {% if item.status_code >= 200 and item.status_code < 300 %}bg-emerald-100 text-emerald-700
+            {% elif item.status_code == 429 %}bg-amber-100 text-amber-700
+            {% elif item.status_code >= 400 %}bg-red-100 text-red-700
+            {% else %}bg-slate-100 text-slate-600{% endif %}">
+            <span class="w-1.5 h-1.5 rounded-full
+                {% if item.status_code >= 200 and item.status_code < 300 %}bg-emerald-500
+                {% elif item.status_code == 429 %}bg-amber-500
+                {% elif item.status_code >= 400 %}bg-red-500
+                {% else %}bg-slate-400{% endif %}"></span>
+            {{ item.status_code }}
+        </span>
+    </td>
+
+    <!-- Response Time -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        <span class="text-sm text-slate-600 tabular-nums">{{ "%.2f" | format(item.response_time) }}s</span>
+    </td>
+
+    <!-- Cache -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        {% if item.cache_hit %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-violet-50 text-violet-700">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                HIT
+            </span>
+        {% else %}
+            <span class="text-[11px] font-medium text-slate-400">MISS</span>
+        {% endif %}
+    </td>
+
+    <!-- Timestamp -->
+    <td class="px-5 py-3.5 whitespace-nowrap">
+        <span class="text-xs text-slate-500 tabular-nums">{{ item.created_at[:19] | default("—") }}</span>
+    </td>
+</tr>
+{% endfor %}
+
+{% if not history %}
+<tr>
+    <td colspan="7" class="px-5 py-12 text-center">
+        <p class="text-sm text-slate-500">No matching results found</p>
+    </td>
+</tr>
+{% endif %}

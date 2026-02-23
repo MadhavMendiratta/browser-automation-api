@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Request History{% endblock %}
+{% block page_title %}Request History{% endblock %}
+{% block page_subtitle %}Log of past scraping activities{% endblock %}
+{% block nav_history %}text-white bg-indigo-600/20 shadow-sm{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- ===== HEADER + SEARCH ===== -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <p class="text-sm text-slate-600">Showing the last <span class="font-semibold text-slate-900">{{ history|length }}</span> requests</p>
+        </div>
+        <div class="relative w-full sm:w-80">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </div>
+            <input type="text" name="q" placeholder="Search by URL, endpoint, or status…"
+                   hx-get="/history-search"
+                   hx-trigger="keyup changed delay:500ms"
+                   hx-target="#history-table-body"
+                   hx-swap="innerHTML"
+                   hx-include="this"
+                   class="block w-full pl-10 pr-4 py-2.5 text-sm border border-slate-300 rounded-xl bg-white
+                          placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-150">
+        </div>
+    </div>
+
+    <!-- ===== DATA TABLE ===== -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-200">
+                <thead>
+                    <tr class="bg-slate-50/80">
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">ID</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Endpoint</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Target URL</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Time</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Cache</th>
+                        <th class="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="history-table-body" class="divide-y divide-slate-100">
+                    {% include "partials/history_rows.html" %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if not history %}
+        <div class="py-16 text-center">
+            <div class="mx-auto w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <p class="text-sm font-medium text-slate-600">No requests recorded yet</p>
+            <p class="text-xs text-slate-400 mt-1">Start scraping to see your history here</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
