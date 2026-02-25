@@ -1,16 +1,16 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Text, DateTime, func, desc
+from sqlalchemy import create_engine, text, Column, Integer, String, Float, Boolean, Text, DateTime, func, desc
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from contextlib import contextmanager
 import logging
 
-# 1. Setup Database Connection
-# We rely on config, but to avoid circular imports, we'll pass the URL dynamically or default it
-# For simplicity in this module, we will define the Base here.
+logger = logging.getLogger(__name__)
+
+# Base declaration for all ORM models
 Base = declarative_base()
 
-# 2. Define the Table Model
+# ScrapingRequest Model
 class ScrapingRequest(Base):
     __tablename__ = "scraping_requests"
 
@@ -36,31 +36,63 @@ class ScrapingRequest(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
-# 3. Database Engine & Session Setup
-# We will initialize these when the app starts
+# Database Engine & Session Setup
 engine = None
 SessionLocal = None
 
 def init_db(database_url: str):
     """
-    Called on app startup to create tables and connection engine.
-    connect_args={"check_same_thread": False} is needed for SQLite in multi-threaded FastAPI.
+    Called on app startup to create the PostgreSQL engine, session factory,
+    and all tables. Raises on missing URL or connection failure.
     """
     global engine, SessionLocal
+
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. "
+            "Please configure a PostgreSQL connection string in your environment."
+        )
+
     engine = create_engine(
-        database_url, 
-        connect_args={"check_same_thread": False} 
+        database_url,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
     )
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
+
+    # Verify the connection is reachable
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info(f"PostgreSQL connection verified: {_mask_url(database_url)}")
+    except Exception as e:
+        logger.error(f"Failed to connect to PostgreSQL: {e}")
+        raise RuntimeError(f"Cannot connect to database: {e}") from e
+
     # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
-    logging.info(f"Database initialized at {database_url}")
+    logger.info("All database tables created / verified.")
 
-# 4. Helper: Get DB Session
-# Use this with 'with get_db_session() as db:'
+
+def _mask_url(url: str) -> str:
+    """Mask password in database URL for safe logging."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(url)
+        if parsed.password:
+            masked = parsed._replace(
+                netloc=f"{parsed.username}:****@{parsed.hostname}"
+                       + (f":{parsed.port}" if parsed.port else "")
+            )
+            return urlunparse(masked)
+    except Exception:
+        pass
+    return url
+
 @contextmanager
 def get_db_session():
+    """Provide a transactional database session scope."""
     db = SessionLocal()
     try:
         yield db
@@ -71,14 +103,13 @@ def get_db_session():
     finally:
         db.close()
 
-# 5. Helper: Log Request
 def log_request_to_db(url: str, endpoint: str, status_code: int, response_time: float, cache_hit: bool, error_message: str = None):
     """
     Inserts a new request record into the database.
     Designed to be run in a BackgroundTask so it doesn't slow down the response.
     """
     if SessionLocal is None:
-        logging.error("Database not initialized!")
+        logger.error("Database not initialized!")
         return
 
     try:
@@ -89,24 +120,21 @@ def log_request_to_db(url: str, endpoint: str, status_code: int, response_time: 
                 status_code=status_code,
                 response_time=response_time,
                 cache_hit=cache_hit,
-                error_message=error_message
+                error_message=error_message,
             )
             db.add(new_record)
-            # Commit happens automatically due to contextmanager
     except Exception as e:
-        logging.error(f"Failed to log request to DB: {e}")
+        logger.error(f"Failed to log request to DB: {e}")
 
-# 6. Analytics: Get History
 def get_request_history(limit: int = 50):
     try:
         with get_db_session() as db:
             requests = db.query(ScrapingRequest).order_by(desc(ScrapingRequest.created_at)).limit(limit).all()
             return [req.to_dict() for req in requests]
     except Exception as e:
-        logging.error(f"Error fetching history: {e}")
+        logger.error(f"Error fetching history: {e}")
         return []
 
-# 7. Analytics: Get Stats
 def get_stats():
     """Returns aggregated statistics about usage."""
     try:
@@ -155,5 +183,5 @@ def get_stats():
                 "top_domains": top_domains
             }
     except Exception as e:
-        logging.error(f"Error fetching stats: {e}")
+        logger.error(f"Error fetching stats: {e}")
         return {"error": str(e)}

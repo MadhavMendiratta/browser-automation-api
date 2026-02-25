@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Browser Automation API",
     description="""
-    🚀 **Advanced Scraping API** built with Playwright, FastAPI, and SQLite.
+    🚀 **Advanced Scraping API** built with Playwright, FastAPI, and PostgreSQL.
     
     This API allows you to automate browser tasks, capture media, and track usage.
     
@@ -70,7 +70,7 @@ app = FastAPI(
     * **📸 Media Capture:** Screenshots (Full Page), PDF, and Video recording.
     * **📊 Analytics:** Built-in dashboard for Request History & Usage Stats.
     * **🛡️ Security:** Rate Limiting to prevent abuse.
-    * **🗄️ Database:** SQLite integration for persistent logging.
+    * **🗄️ Database:** PostgreSQL integration for persistent logging.
     """,
     
     version="1.0.0",

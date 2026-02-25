@@ -1,8 +1,11 @@
 import os
+import logging
 from diskcache import Cache
 from fastapi.security import HTTPBearer
-from utils import load_env_file
+from dotenv import load_dotenv
 import hashlib
+
+logger = logging.getLogger(__name__)
 
 
 def url_to_sha256_filename(url: str, extension: str = "webm") -> str:
@@ -13,7 +16,8 @@ def url_to_sha256_filename(url: str, extension: str = "webm") -> str:
     return filename
 
 def setup_configurations():
-    load_env_file()
+    # Load .env file if present (for local development)
+    load_dotenv()
 
     cache = Cache("./cache")
     cache_expiration_seconds = int(os.getenv("CACHE_EXPIRATION_SECONDS", 3600))
@@ -25,8 +29,15 @@ def setup_configurations():
     api_key = os.environ.get("API_KEY", "none")
     security = HTTPBearer(auto_error=False)
 
-    # FIXED: Added DATABASE_URL to return value — app.py destructures 5 values but only 4 were returned
-    database_url = os.environ.get("DATABASE_URL", "sqlite:///./scraper.db")
+    # DATABASE_URL is required — no fallback
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is not set. "
+            "Please provide a PostgreSQL connection string, e.g.: "
+            "postgresql+psycopg2://user:password@localhost:5432/dbname"
+        )
+    logger.info("DATABASE_URL loaded from environment.")
 
     return cache, cache_expiration_seconds, security, api_key, database_url
 
@@ -296,29 +307,3 @@ async def hide_cookie_banners(page):
     except Exception as e:
         print(f"Error hiding cookie banners: {e}")
 
-from pathlib import Path
-
-
-def setup_configurations():
-    load_env_file()
-
-    # ... (keep cache setup)
-    cache = Cache("./cache")
-    cache_expiration_seconds = int(os.getenv("CACHE_EXPIRATION_SECONDS", 3600))
-
-    # ... (keep playwright path)
-    playwright_browsers_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "0")
-    if playwright_browsers_path != "0":
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = playwright_browsers_path
-
-    # ... (keep security setup)
-    api_key = os.environ.get("API_KEY", "none")
-    security = HTTPBearer(auto_error=False)
-    
-    # === ADDED THIS SECTION ===
-    # Database Configuration
-    # This creates a file named 'scraproxy.db' in the main folder
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./scraproxy.db")
-    
-    # Returns the new DATABASE_URL along with other settings
-    return cache, cache_expiration_seconds, security, api_key, DATABASE_URL
