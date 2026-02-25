@@ -1,9 +1,8 @@
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from fastapi import FastAPI, Depends, HTTPException, Form, Query, Security, BackgroundTasks, Request
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles  # FIXED: Added for serving frontend static files
 from fastapi.templating import Jinja2Templates  # FIXED: Added for Jinja2 template rendering
 from playwright.async_api import async_playwright
@@ -21,7 +20,12 @@ import htmlmin
 from contextlib import asynccontextmanager
 
 # Hamare naye database functions import karo
-from database import init_db, log_request_to_db, get_request_history, get_stats
+from database import init_db, log_request_to_db, get_request_history, get_stats, User
+from auth import auth_router
+from auth.dependencies import get_optional_user, get_user_from_cookie
+from auth.security import verify_password, create_refresh_token, create_reset_token, decode_reset_token, hash_password, REFRESH_TOKEN_EXPIRE_DAYS, RESET_TOKEN_EXPIRE_MINUTES
+from auth.schemas import _validate_username, _validate_password
+from typing import Optional
 
 from definitions import (
     ScreenshotResponse,
@@ -39,17 +43,7 @@ import io
 from config import setup_configurations, url_to_sha256_filename, hide_cookie_banners
 
 # === RATE LIMITER SETUP ===
-# Define a key function that uses IP address by default
-def get_rate_limit_key(request: Request):
-    # OPTIONAL: BYPASS IF API KEY MATCHES
-    # If the user provides the correct API Key, we return a specific value 
-    # that we can whitelist, OR we just let them pass. 
-    # For now, we stick to IP-based limiting for everyone to keep it simple.
-    return get_remote_address(request)
-
-# Initialize the Limiter
-limiter = Limiter(key_func=get_rate_limit_key)
-
+from rate_limit import limiter
 
 
 @asynccontextmanager
@@ -93,6 +87,9 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
     )
 
 cache, CACHE_EXPIRATION_SECONDS, security, API_KEY, DATABASE_URL = setup_configurations()
+
+# Include auth router
+app.include_router(auth_router)
 
 # FIXED: Ensure frontend directories exist before mounting
 os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js"), exist_ok=True)
@@ -138,6 +135,7 @@ async def browse(
     cookiebanner: bool = Query(False, description="Attempt to close cookie banners"),
     scroll: bool = Query(False, description="Attempt to scroll down the page."),
     credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     start_time = time.time()
     """
@@ -150,7 +148,7 @@ async def browse(
         if cache_key in cache:
             # === DB LOGGING (CACHE HIT) ===
             process_time = time.time() - start_time
-            background_tasks.add_task(log_request_to_db, url, "browse", 200, process_time, True, None)
+            background_tasks.add_task(log_request_to_db, url, "browse", 200, process_time, True, None, current_user.id if current_user else None)
             return JSONResponse(content=json.loads(cache[cache_key]))
 
         async with async_playwright() as p:
@@ -478,14 +476,14 @@ async def browse(
             
             # === DB LOGGING (SUCCESS) ===
             process_time = time.time() - start_time
-            background_tasks.add_task(log_request_to_db, url, "browse", main_response_status, process_time, False, None)
+            background_tasks.add_task(log_request_to_db, url, "browse", main_response_status, process_time, False, None, current_user.id if current_user else None)
             
             return JSONResponse(content=response_data)
 
     except Exception as e:
         # === DB LOGGING (ERROR) ===
         process_time = time.time() - start_time
-        background_tasks.add_task(log_request_to_db, url, "browse", 500, process_time, False, str(e))
+        background_tasks.add_task(log_request_to_db, url, "browse", 500, process_time, False, str(e), current_user.id if current_user else None)
         
         # Re-raise the exception so FastAPI handles it
         raise e
@@ -500,6 +498,7 @@ async def screenshotter(
     thumbnail_size: int = 450,
     quality: int = 85,
     credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """
     Capture a screenshot of the specified URL, optionally skipping the cache if `live=True`.
@@ -549,18 +548,21 @@ async def screenshotter(
 
 @app.get("/history", tags=["Analytics"])
 @limiter.limit("60/minute")
-async def history(request: Request,limit: int = 50, credentials: HTTPAuthorizationCredentials = Depends(optional_auth)):
-    return get_request_history(limit)
+async def history(request: Request,limit: int = 50, credentials: HTTPAuthorizationCredentials = Depends(optional_auth), current_user: Optional[User] = Depends(get_optional_user)):
+    uid = current_user.id if current_user else None
+    return get_request_history(limit, user_id=uid)
 
 @app.get("/stats", tags=["Analytics"])
 @limiter.limit("60/minute")
-async def stats(request: Request,credentials: HTTPAuthorizationCredentials = Depends(optional_auth)):
-    return get_stats()
+async def stats(request: Request,credentials: HTTPAuthorizationCredentials = Depends(optional_auth), current_user: Optional[User] = Depends(get_optional_user)):
+    uid = current_user.id if current_user else None
+    return get_stats(user_id=uid)
 
 @app.post("/minimize", response_model=MinimizeHTMLResponse, status_code=200)
 async def minimize_html(
     html: str = Form(...),
     credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """
     Minimize the given HTML content by removing unnecessary comments and whitespace.
@@ -598,6 +600,7 @@ async def minimize_html(
 async def extract_text_from_html(
     html: str = Form(...),
     credentials: HTTPAuthorizationCredentials = Depends(optional_auth),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """
     Extract plain text from the provided HTML content.
@@ -733,23 +736,254 @@ async def video(
 # FRONTEND ROUTES — Jinja2 + HTMX Pages
 # ====================================================================
 
+# ---- Auth UI Routes ----
+
+@app.get("/login", response_class=HTMLResponse, tags=["Auth UI"])
+async def login_page(request: Request):
+    """Render login form. Redirect to dashboard if already logged in."""
+    user = get_user_from_cookie(request)
+    if user:
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse("auth/login.html", {"request": request, "error": None})
+
+
+@app.post("/login", response_class=HTMLResponse, tags=["Auth UI"])
+@limiter.limit("5/minute")
+async def login_submit(request: Request, email: str = Form(...), password: str = Form(...)):
+    """Validate credentials, set refresh cookie only, redirect to dashboard."""
+    from database import get_db_session, User as DBUser
+    with get_db_session() as db:
+        user = db.query(DBUser).filter(DBUser.email == email).first()
+        if not user or not verify_password(password, user.hashed_password):
+            return templates.TemplateResponse(
+                "auth/login.html", {"request": request, "error": "Invalid email or password"}
+            )
+        refresh_token = create_refresh_token(data={"sub": str(user.id)})
+
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        samesite="lax",
+        secure=False,  # set True behind HTTPS in production
+        path="/",
+    )
+    return response
+
+
+@app.get("/register", response_class=HTMLResponse, tags=["Auth UI"])
+async def register_page(request: Request):
+    """Render registration form."""
+    user = get_user_from_cookie(request)
+    if user:
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse("auth/register.html", {"request": request, "error": None, "success": None})
+
+
+@app.post("/register", response_class=HTMLResponse, tags=["Auth UI"])
+@limiter.limit("3/minute")
+async def register_submit(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Validate inputs, create user, and redirect to login on success."""
+    from database import get_db_session, User as DBUser
+    from auth.security import hash_password
+
+    # Validate password confirmation
+    if password != confirm_password:
+        return templates.TemplateResponse(
+            "auth/register.html", {"request": request, "error": "Passwords do not match", "success": None}
+        )
+
+    # Validate username
+    try:
+        _validate_username(username)
+    except ValueError as e:
+        return templates.TemplateResponse(
+            "auth/register.html", {"request": request, "error": str(e), "success": None}
+        )
+
+    # Validate password
+    try:
+        _validate_password(password)
+    except ValueError as e:
+        return templates.TemplateResponse(
+            "auth/register.html", {"request": request, "error": str(e), "success": None}
+        )
+
+    with get_db_session() as db:
+        if db.query(DBUser).filter(DBUser.email == email).first():
+            return templates.TemplateResponse(
+                "auth/register.html", {"request": request, "error": "Email already registered", "success": None}
+            )
+        if db.query(DBUser).filter(DBUser.username == username).first():
+            return templates.TemplateResponse(
+                "auth/register.html", {"request": request, "error": "Username already taken", "success": None}
+            )
+        db.add(DBUser(
+            username=username,
+            email=email,
+            hashed_password=hash_password(password),
+        ))
+
+    return RedirectResponse(url="/login", status_code=302)
+
+
+@app.get("/logout", tags=["Auth UI"])
+async def logout(request: Request):
+    """Clear refresh cookie and redirect to login."""
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key="refresh_token", path="/", httponly=True, samesite="lax")
+    return response
+
+
+@app.get("/forgot-password", response_class=HTMLResponse, tags=["Auth UI"])
+async def forgot_password_page(request: Request):
+    """Render the forgot-password form."""
+    user = get_user_from_cookie(request)
+    if user:
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse(
+        "auth/forgot_password.html", {"request": request, "error": None, "success": None}
+    )
+
+
+@app.post("/forgot-password", response_class=HTMLResponse, tags=["Auth UI"])
+@limiter.limit("3/minute")
+async def forgot_password_submit(request: Request, email: str = Form(...)):
+    """Generate a reset token, log the link, and show a generic success message."""
+    from database import get_db_session, User as DBUser
+    from datetime import timedelta
+
+    ctx = {"request": request, "error": None, "success": None}
+
+    with get_db_session() as db:
+        user = db.query(DBUser).filter(DBUser.email == email).first()
+        if user:
+            token = create_reset_token(data={"sub": str(user.id)})
+            user.reset_token = token
+            user.reset_token_expires = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+
+            reset_link = f"{request.base_url}reset-password?token={token}"
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("PASSWORD RESET LINK (email simulation): %s", reset_link)
+            print(f"\n{'='*60}")
+            print(f"  PASSWORD RESET LINK (email simulation)")
+            print(f"  {reset_link}")
+            print(f"{'='*60}\n")
+
+    # Always show the same message to prevent user enumeration
+    ctx["success"] = "If that email is registered, a password-reset link has been sent. Check your server console."
+    return templates.TemplateResponse("auth/forgot_password.html", ctx)
+
+
+@app.get("/reset-password", response_class=HTMLResponse, tags=["Auth UI"])
+async def reset_password_page(request: Request, token: str = Query(default="")):
+    """Render the reset-password form with the token from the URL."""
+    user = get_user_from_cookie(request)
+    if user:
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse(
+        "auth/reset_password.html",
+        {"request": request, "token": token, "error": None, "success": None},
+    )
+
+
+@app.post("/reset-password", response_class=HTMLResponse, tags=["Auth UI"])
+@limiter.limit("5/minute")
+async def reset_password_submit(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Validate the token, update the password, and show result."""
+    from database import get_db_session, User as DBUser
+
+    ctx = {"request": request, "token": token, "error": None, "success": None}
+
+    # Validate password confirmation
+    if new_password != confirm_password:
+        ctx["error"] = "Passwords do not match"
+        return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+    # Validate password strength
+    try:
+        _validate_password(new_password)
+    except ValueError as e:
+        ctx["error"] = str(e)
+        return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+    # Decode token
+    payload = decode_reset_token(token)
+    if payload is None:
+        ctx["error"] = "Invalid or expired reset token"
+        ctx["token"] = ""
+        return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        ctx["error"] = "Invalid reset token"
+        ctx["token"] = ""
+        return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+    with get_db_session() as db:
+        user = db.query(DBUser).filter(DBUser.id == int(user_id_str)).first()
+
+        if not user or user.reset_token != token:
+            ctx["error"] = "Reset token already used or invalid"
+            ctx["token"] = ""
+            return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+        if user.reset_token_expires is None or user.reset_token_expires < datetime.utcnow():
+            ctx["error"] = "Reset token has expired"
+            ctx["token"] = ""
+            return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+        # Update password and invalidate token
+        user.hashed_password = hash_password(new_password)
+        user.reset_token = None
+        user.reset_token_expires = None
+
+    ctx["success"] = "Password has been reset successfully. You can now sign in."
+    ctx["token"] = ""
+    return templates.TemplateResponse("auth/reset_password.html", ctx)
+
+
+# ---- Protected Frontend Pages ----
+
 @app.get("/", response_class=HTMLResponse, tags=["Frontend"])
 async def dashboard_page(request: Request):
-    """Render the main Dashboard / Scraper Console page."""
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    """Render the main Dashboard. Redirects to /login if not authenticated."""
+    user = get_user_from_cookie(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("dashboard.html", {"request": request, "user": user})
 
 
 @app.get("/history-page", response_class=HTMLResponse, tags=["Frontend"])
 async def history_page(request: Request):
     """Render the Request History page with the last 50 entries."""
-    history_data = get_request_history(50)
-    return templates.TemplateResponse("history.html", {"request": request, "history": history_data})
+    user = get_user_from_cookie(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    history_data = get_request_history(50, user_id=user.id)
+    return templates.TemplateResponse("history.html", {"request": request, "history": history_data, "user": user})
 
 
 @app.get("/history-search", response_class=HTMLResponse, tags=["Frontend"])
 async def history_search(request: Request, q: str = Query("")):
     """HTMX partial: filter history table rows by search query."""
-    history_data = get_request_history(100)
+    user = get_user_from_cookie(request)
+    uid = user.id if user else None
+    history_data = get_request_history(100, user_id=uid)
     if q.strip():
         q_lower = q.lower().strip()
         history_data = [
@@ -764,8 +998,11 @@ async def history_search(request: Request, q: str = Query("")):
 @app.get("/stats-page", response_class=HTMLResponse, tags=["Frontend"])
 async def stats_page(request: Request):
     """Render the Analytics / Stats page with KPI cards and charts."""
-    stats_data = get_stats()
-    return templates.TemplateResponse("stats.html", {"request": request, "stats": stats_data})
+    user = get_user_from_cookie(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    stats_data = get_stats(user_id=user.id)
+    return templates.TemplateResponse("stats.html", {"request": request, "stats": stats_data, "user": user})
 
 
 @app.post("/scrape-htmx", response_class=HTMLResponse, tags=["Frontend"])
@@ -779,11 +1016,21 @@ async def scrape_htmx(
     scroll_page: bool = Form(False),
 ):
     """
-    HTMX endpoint: Always captures screenshot + raw HTML + action-specific data.
+    HTMX endpoint: Processes **only** what the chosen action requires.
+      - screenshot  → capture image only (no HTML parsing)
+      - browse      → full dataset (screenshot, HTML, JSON metadata)
+      - extract_text → plain text only (no screenshot)
+      - markdown    → markdown only (no screenshot)
     Returns a tabbed HTML partial (result_card.html) for Alpine.js tab switching.
     """
     start_time = time.time()
     result = {}
+    user = get_user_from_cookie(request)
+    uid = user.id if user else None
+
+    VALID_ACTIONS = {"screenshot", "browse", "extract_text", "markdown"}
+    if action not in VALID_ACTIONS:
+        action = "screenshot"
 
     try:
         async with async_playwright() as p:
@@ -817,58 +1064,83 @@ async def scrape_htmx(
 
             title = await page.title() or "Untitled"
 
-            # --- Always capture ALL three data types for the tabbed UI ---
-
-            # 1. Screenshot (always)
-            screenshot_bytes = await page.screenshot(full_page=True)
-            image = Image.open(io.BytesIO(screenshot_bytes))
-            optimized = optimize_image(image, quality=85)
-            screenshot_b64 = base64.b64encode(optimized).decode("utf-8")
-
-            # 2. Raw HTML (always)
-            raw_html = await page.content()
-
-            # 3. Action-specific primary data
+            # ----- Action-specific processing -----
+            screenshot_b64 = ""
+            thumbnail_b64 = ""
+            raw_html = ""
             primary_data = ""
-            if action == "extract_text":
+            json_data = ""
+
+            if action == "screenshot":
+                # Only capture image — skip all HTML processing
+                screenshot_bytes = await page.screenshot(full_page=True)
+                image = Image.open(io.BytesIO(screenshot_bytes))
+                optimized = optimize_image(image, quality=85)
+                thumbnail_img = create_thumbnail(image, max_size=450)
+                screenshot_b64 = base64.b64encode(optimized).decode("utf-8")
+                thumbnail_b64 = base64.b64encode(thumbnail_img).decode("utf-8")
+
+            elif action == "browse":
+                # Full dataset: screenshot + HTML + JSON metadata
+                screenshot_bytes = await page.screenshot(full_page=True)
+                image = Image.open(io.BytesIO(screenshot_bytes))
+                optimized = optimize_image(image, quality=85)
+                thumbnail_img = create_thumbnail(image, max_size=450)
+                screenshot_b64 = base64.b64encode(optimized).decode("utf-8")
+                thumbnail_b64 = base64.b64encode(thumbnail_img).decode("utf-8")
+
+                raw_html = await page.content()
+
+                meta_description = ""
+                try:
+                    meta_el = await page.locator("meta[name='description']").get_attribute("content")
+                    meta_description = meta_el or ""
+                except Exception:
+                    pass
+
+                cookies = await context.cookies()
+
+                json_metadata = {
+                    "url": url,
+                    "page_url": page.url,
+                    "action": action,
+                    "status_code": status_code,
+                    "title": title,
+                    "meta_description": meta_description,
+                    "cookies_count": len(cookies),
+                    "cookies": [
+                        {"name": c["name"], "domain": c["domain"], "secure": c["secure"]}
+                        for c in cookies
+                    ],
+                }
+                json_data = json.dumps(json_metadata, indent=2)
+
+            elif action == "extract_text":
+                # Only extract text — no screenshot
+                raw_html = await page.content()
                 soup = BeautifulSoup(raw_html, "html.parser")
                 primary_data = soup.get_text(separator="\n", strip=True)
+                raw_html = ""  # not needed in result
+
             elif action == "markdown":
+                # Only convert to markdown — no screenshot
+                page_html = await page.content()
                 md_converter = html2text.HTML2Text()
                 md_converter.ignore_links = False
-                primary_data = md_converter.handle(raw_html)
-            else:
-                primary_data = screenshot_b64  # browse/screenshot use image as primary
-
-            # 4. Build JSON metadata
-            meta_description = ""
-            try:
-                meta_el = await page.locator("meta[name='description']").get_attribute("content")
-                meta_description = meta_el or ""
-            except Exception:
-                pass
-
-            json_metadata = {
-                "url": url,
-                "action": action,
-                "status_code": status_code,
-                "title": title,
-                "meta_description": meta_description,
-                "page_url": page.url,
-            }
+                primary_data = md_converter.handle(page_html)
 
             await context.close()
             await browser.close()
 
         process_time = time.time() - start_time
-        json_metadata["response_time_seconds"] = round(process_time, 2)
 
         result = {
             "type": action,
             "data": primary_data,
             "screenshot": screenshot_b64,
+            "thumbnail": thumbnail_b64,
             "raw_html": raw_html,
-            "json_data": json.dumps(json_metadata, indent=2),
+            "json_data": json_data,
             "title": title,
             "status_code": status_code,
             "response_time": round(process_time, 2),
@@ -878,7 +1150,7 @@ async def scrape_htmx(
 
         # Log to DB in background
         background_tasks.add_task(
-            log_request_to_db, url, action, status_code, process_time, False, None
+            log_request_to_db, url, action, status_code, process_time, False, None, uid
         )
 
         response = templates.TemplateResponse(
@@ -895,6 +1167,7 @@ async def scrape_htmx(
             "type": "error",
             "data": str(e),
             "screenshot": "",
+            "thumbnail": "",
             "raw_html": "",
             "json_data": json.dumps({"error": str(e)}, indent=2),
             "success": False,
@@ -904,7 +1177,7 @@ async def scrape_htmx(
             "title": "Error",
         }
         background_tasks.add_task(
-            log_request_to_db, url, action, 500, process_time, False, str(e)
+            log_request_to_db, url, action, 500, process_time, False, str(e), uid
         )
 
         response = templates.TemplateResponse(
@@ -922,8 +1195,10 @@ async def scrape_htmx(
 
 @app.get("/components/recent-activity", response_class=HTMLResponse, tags=["Frontend"])
 async def recent_activity_component(request: Request):
-    """HTMX partial: Returns the last 5 requests as list items for the live activity widget."""
-    history_data = get_request_history(5)
+    """HTMX partial: Returns the last 5 requests for the current user."""
+    user = get_user_from_cookie(request)
+    uid = user.id if user else None
+    history_data = get_request_history(5, user_id=uid)
     return templates.TemplateResponse(
         "partials/recent_activity.html", {"request": request, "items": history_data}
     )

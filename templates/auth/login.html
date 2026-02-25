@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Scraper Console</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] } } }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }</style>
+</head>
+<body class="h-full bg-slate-50 antialiased">
+
+<div class="min-h-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="w-full max-w-md space-y-8">
+
+        <!-- Logo -->
+        <div class="text-center">
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-600/30 mb-4">
+                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Welcome back</h2>
+            <p class="mt-1 text-sm text-slate-500">Sign in to your Scraper Console</p>
+        </div>
+
+        <!-- Error message -->
+        {% if error %}
+        <div class="rounded-xl bg-red-50 border border-red-200/80 px-4 py-3">
+            <p class="text-sm text-red-700 font-medium">{{ error }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Form -->
+        <form method="POST" action="/login" class="space-y-5">
+            <div>
+                <label for="email" class="block text-sm font-medium text-slate-700 mb-1.5">Email address</label>
+                <input type="email" name="email" id="email" required autocomplete="email"
+                       placeholder="you@example.com"
+                       class="block w-full px-4 py-3 text-sm border border-slate-300 rounded-xl bg-white placeholder-slate-400
+                              focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-150">
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+                <input type="password" name="password" id="password" required autocomplete="current-password"
+                       placeholder="••••••••"
+                       class="block w-full px-4 py-3 text-sm border border-slate-300 rounded-xl bg-white placeholder-slate-400
+                              focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-150">
+                <div class="mt-1.5 text-right">
+                    <a href="/forgot-password" class="text-xs font-medium text-indigo-600 hover:text-indigo-500 transition-colors">Forgot password?</a>
+                </div>
+            </div>
+
+            <button type="submit"
+                    class="w-full flex justify-center py-3 px-4 text-sm font-semibold rounded-xl text-white
+                           bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500
+                           shadow-lg shadow-indigo-600/25 transition-all duration-150">
+                Sign in
+            </button>
+        </form>
+
+        <p class="text-center text-sm text-slate-500">
+            Don't have an account?
+            <a href="/register" class="font-semibold text-indigo-600 hover:text-indigo-500 transition-colors">Create one</a>
+        </p>
+    </div>
+</div>
+
+</body>
+</html>
